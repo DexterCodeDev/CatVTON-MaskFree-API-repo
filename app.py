@@ -7,7 +7,6 @@ from fastapi.responses import StreamingResponse
 from PIL import Image
 from huggingface_hub import login
 
-# The Dockerfile handles adding the external CatVTON repo to the PYTHONPATH
 from model.pipeline import CatVTONPipeline
 
 app = FastAPI(
@@ -18,7 +17,6 @@ app = FastAPI(
     }
 )
 
-# Allow your web storefront to make requests to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -27,7 +25,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global variable to hold the model in VRAM
 model_pipeline = None
 
 @app.on_event("startup")
@@ -35,20 +32,18 @@ async def load_model():
     """Loads the Mask-Free CatVTON weights into the GPU during container boot."""
     global model_pipeline
     try:
-        # Securely fetch the token from the server's environment variables
         hf_token = os.environ.get("HF_TOKEN")
         if not hf_token:
             print("WARNING: HF_TOKEN environment variable is missing!")
         
-        # Authenticate with Hugging Face to bypass the gated repository
         login(token=hf_token)
         
-        # Construct the custom Mask-Free pipeline
+        # THE FIX: Changed torch.bfloat16 to torch.float16 for hardware compatibility
         model_pipeline = CatVTONPipeline(
             base_ckpt="runwayml/stable-diffusion-inpainting",
             attn_ckpt="zhengchong/CatVTON-MaskFree",
             attn_ckpt_version="mix", 
-            weight_dtype=torch.bfloat16,
+            weight_dtype=torch.float16, 
             device='cuda'
         )
         print("Mask-Free Model loaded successfully.")
