@@ -5,7 +5,8 @@ from fastapi.responses import StreamingResponse
 from PIL import Image
 import torch
 
-from pipeline import CatVTONPipeline 
+# Updated to look inside the cloned repository's "model" folder
+from model.pipeline import CatVTONPipeline 
 
 app = FastAPI(title="CatVTON-MaskFree API")
 logging.basicConfig(level=logging.INFO)
