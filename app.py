@@ -1,10 +1,13 @@
 import io
+import os
 import torch
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from PIL import Image
+from huggingface_hub import login
 
+# The Dockerfile handles adding the external CatVTON repo to the PYTHONPATH
 from model.pipeline import CatVTONPipeline
 
 app = FastAPI(
@@ -15,6 +18,7 @@ app = FastAPI(
     }
 )
 
+# Allow your web storefront to make requests to this API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], 
@@ -23,50 +27,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global variable to hold the model in VRAM
 model_pipeline = None
 
 @app.on_event("startup")
 async def load_model():
-    """Loads the Mask-Free CatVTON weights into the GPU."""
+    """Loads the Mask-Free CatVTON weights into the GPU during container boot."""
     global model_pipeline
     try:
-        # Specifically pulling the Mask-Free checkpoint from HuggingFace
-        model_pipeline = CatVTONPipeline.from_pretrained("zhengchong/CatVTON-MaskFree").to("cuda")
+        # Securely fetch the token from the server's environment variables
+        hf_token = os.environ.get("HF_TOKEN")
+        if not hf_token:
+            print("WARNING: HF_TOKEN environment variable is missing!")
+        
+        # Authenticate with Hugging Face to bypass the gated repository
+        login(token=hf_token)
+        
+        # Construct the custom Mask-Free pipeline
+        model_pipeline = CatVTONPipeline(
+            base_ckpt="runwayml/stable-diffusion-inpainting",
+            attn_ckpt="zhengchong/CatVTON-MaskFree",
+            attn_ckpt_version="mix", 
+            weight_dtype=torch.bfloat16,
+            device='cuda'
+        )
         print("Mask-Free Model loaded successfully.")
     except Exception as e:
         print(f"Failed to load model: {e}")
 
 @app.get("/")
 def health_check():
+    """Endpoint to check if the GPU has finished downloading and loading the model."""
     return {"status": "active", "model_loaded": model_pipeline is not None}
 
 @app.post("/try-on")
 async def generate_try_on(
     person_image: UploadFile = File(...),
     garment_image: UploadFile = File(...)
-    # The mask requirement has been entirely removed
 ):
-    """Processes the 2-image try-on request."""
+    """Processes the 2-image try-on request and returns the synthesized image."""
     if not model_pipeline:
-        raise HTTPException(status_code=503, detail="GPU Model is still initializing.")
+        raise HTTPException(status_code=503, detail="GPU Model is still initializing or failed to load.")
 
     try:
+        # Convert incoming multipart files into RGB PIL Images
         person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
         garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
 
-        # Run inference on the GPU without a mask
+        # Generate a dummy black mask to satisfy the underlying inpainting architecture
+        dummy_mask = Image.new("L", person_img.size, 0)
+
+        # Run inference on the GPU
         with torch.no_grad():
             result_image = model_pipeline(
                 image=person_img,
                 condition_image=garment_img,
+                mask=dummy_mask,
                 num_inference_steps=30, 
                 guidance_scale=2.5
             )[0]
 
+        # Convert output to a byte stream
         memory_stream = io.BytesIO()
         result_image.save(memory_stream, format="PNG")
         memory_stream.seek(0)
 
+        # Stream directly back to the frontend
         return StreamingResponse(memory_stream, media_type="image/png")
 
     except Exception as e:
