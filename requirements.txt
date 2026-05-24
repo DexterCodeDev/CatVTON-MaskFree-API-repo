@@ -9,3 +9,5 @@ accelerate==0.28.0
 Pillow==10.2.0
 opencv-python-headless==4.9.0.80
 xformers==0.0.25
+omegaconf
+einops
