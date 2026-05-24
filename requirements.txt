@@ -2,11 +2,12 @@ fastapi
 uvicorn[standard]
 python-multipart
 
-# Official CatVTON Requirements (Pinned to Stable Releases)
+# Official CatVTON Requirements (Version Locked for Stability)
 torch==2.4.0
 torchvision==0.19.0
-accelerate==0.31.0
+accelerate==0.32.1
 diffusers==0.30.2
+peft==0.17.0
 matplotlib==3.9.1
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
@@ -23,5 +24,4 @@ omegaconf==2.3.0
 pycocotools==2.0.8
 av==12.3.0
 gradio==4.41.0
-peft>=0.17.0
 huggingface_hub>=0.34.0,<2.0
