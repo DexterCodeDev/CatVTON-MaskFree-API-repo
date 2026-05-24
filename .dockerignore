@@ -1,0 +1,22 @@
+# Git and local environments
+.git
+.gitignore
+.env
+.venv
+env/
+venv/
+
+# Docker config
+Dockerfile
+.dockerignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Avoid copying local HuggingFace caches if they exist in the directory
+.cache/
+
+# Markdown/Documentation
+README.md
