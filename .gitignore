@@ -1,0 +1,16 @@
+# Python environment
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+
+# HuggingFace Cache
+.cache/
+
+# Local images/tests
+*.jpg
+*.jpeg
+*.png
