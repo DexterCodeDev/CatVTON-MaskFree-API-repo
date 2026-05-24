@@ -1,25 +1,80 @@
-FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
+import io
+import torch
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from PIL import Image
 
-WORKDIR /app
+# The Dockerfile handles adding the external CatVTON repo to the PYTHONPATH
+from model.pipeline import CatVTONPipeline
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    git \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+app = FastAPI(
+    title="Serene Clothing Virtual Try-On API",
+    description="Serverless GPU inference endpoint loading CatVTON externally.",
+    contact={
+        "email": "support@sereneclothing.store"
+    }
+)
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Allow your web storefront to make requests to this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-# Externally load the public CatVTON repository
-RUN git clone https://github.com/Zheng-Chong/CatVTON.git /external_modules/CatVTON
+# Global variable to hold the model in VRAM
+model_pipeline = None
 
-# Add the cloned repo to the Python path
-ENV PYTHONPATH="${PYTHONPATH}:/external_modules/CatVTON"
+@app.on_event("startup")
+async def load_model():
+    """Loads the CatVTON weights into the GPU during container boot."""
+    global model_pipeline
+    try:
+        model_pipeline = CatVTONPipeline.from_pretrained("zhengchong/CatVTON").to("cuda")
+        print("Model loaded successfully.")
+    except Exception as e:
+        print(f"Failed to load model: {e}")
 
-COPY . .
+@app.get("/")
+def health_check():
+    return {"status": "active", "model_loaded": model_pipeline is not None}
 
-EXPOSE 8080
+@app.post("/try-on")
+async def generate_try_on(
+    person_image: UploadFile = File(...),
+    garment_image: UploadFile = File(...),
+    mask_image: UploadFile = File(...)
+):
+    """Processes the try-on request and returns the synthesized image."""
+    if not model_pipeline:
+        raise HTTPException(status_code=503, detail="GPU Model is still initializing.")
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+    try:
+        # Convert incoming multipart files into RGB PIL Images
+        person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
+        garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
+        mask_img = Image.open(io.BytesIO(await mask_image.read())).convert("L")
+
+        # Run inference on the GPU
+        with torch.no_grad():
+            result_image = model_pipeline(
+                image=person_img,
+                condition_image=garment_img,
+                mask=mask_img,
+                num_inference_steps=30, 
+                guidance_scale=2.5
+            )[0]
+
+        # Convert output to a byte stream
+        memory_stream = io.BytesIO()
+        result_image.save(memory_stream, format="PNG")
+        memory_stream.seek(0)
+
+        # Stream directly back to the frontend
+        return StreamingResponse(memory_stream, media_type="image/png")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
