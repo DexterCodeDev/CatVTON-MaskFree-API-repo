@@ -2,11 +2,18 @@ FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
 WORKDIR /app
 
+# Prevent interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Pre-configure the timezone to avoid the tzdata prompt freezing the build
+ENV TZ=UTC
+
 # Install system dependencies required for OpenCV and fetching external modules
 RUN apt-get update && apt-get install -y \
     git \
     libgl1-mesa-glx \
     libglib2.0-0 \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
