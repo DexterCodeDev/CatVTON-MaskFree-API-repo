@@ -5,13 +5,11 @@ from fastapi.responses import StreamingResponse
 from PIL import Image
 import torch
 
-# Import the CatVTON pipeline from your local files
 from pipeline import CatVTONPipeline 
 
 app = FastAPI(title="CatVTON-MaskFree API")
 logging.basicConfig(level=logging.INFO)
 
-# --- Model Initialization ---
 try:
     logging.info("Initializing CatVTON pipeline...")
     pipeline = CatVTONPipeline(
@@ -29,23 +27,20 @@ async def generate_tryon(
     garment_image: UploadFile = File(...)
 ):
     try:
-        # 1. Read and convert uploaded images to PIL Images
         person_bytes = await person_image.read()
         garment_bytes = await garment_image.read()
         
         person_pil = Image.open(io.BytesIO(person_bytes)).convert("RGB")
         garment_pil = Image.open(io.BytesIO(garment_bytes)).convert("RGB")
 
-        # 2. Run Inference (Actual AI generation)
+        # Run Inference
         result_image = pipeline(person_pil, garment_pil)
         
-        # Safety check: extract the image if the pipeline returns a list or object
         if isinstance(result_image, list):
             result_image = result_image[0]
         elif hasattr(result_image, 'images'):
             result_image = result_image.images[0]
 
-        # 3. Convert generated image back to byte stream for response
         output_buf = io.BytesIO()
         result_image.save(output_buf, format="PNG")
         output_buf.seek(0)
