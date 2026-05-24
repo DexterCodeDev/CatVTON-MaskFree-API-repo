@@ -1,26 +1,26 @@
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV DEBIAN_FRONTEND=noninteractive
-
-RUN apt-get update && apt-get install -y \
-    python3-pip \
-    python3-dev \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    git \
-    && rm -rf /var/lib/apt/lists/*
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
 WORKDIR /app
 
-# Clone CatVTON directly into the container
-RUN git clone https://github.com/Zheng-Chong/CatVTON.git .
+# Install system dependencies required for OpenCV and fetching external modules
+RUN apt-get update && apt-get install -y \
+    git \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
 
-COPY app.py .
+# Install your Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Externally load the public CatVTON repository
+RUN git clone https://github.com/Zheng-Chong/CatVTON.git /external_modules/CatVTON
+
+# Add the cloned repo to the Python path
+ENV PYTHONPATH="${PYTHONPATH}:/external_modules/CatVTON"
+
+COPY . .
 
 EXPOSE 8080
 
