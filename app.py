@@ -38,7 +38,7 @@ async def load_model():
         
         login(token=hf_token)
         
-        # THE FIX: Changed torch.bfloat16 to torch.float16 for hardware compatibility
+        # Using torch.float16 for hardware compatibility with the NVIDIA L4
         model_pipeline = CatVTONPipeline(
             base_ckpt="runwayml/stable-diffusion-inpainting",
             attn_ckpt="zhengchong/CatVTON-MaskFree",
@@ -69,8 +69,8 @@ async def generate_try_on(
         person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
         garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
 
-        # Generate a dummy black mask to satisfy the underlying inpainting architecture
-        dummy_mask = Image.new("L", person_img.size, 0)
+        # THE FIX: Generate a dummy white mask (255) to allow the Mask-Free AI to repaint the clothes
+        dummy_mask = Image.new("L", person_img.size, 255)
 
         # Run inference on the GPU
         with torch.no_grad():
