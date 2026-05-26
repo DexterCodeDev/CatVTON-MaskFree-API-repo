@@ -38,9 +38,9 @@ async def load_model():
         
         login(token=hf_token)
         
-        # THE FIX: Switch to bfloat16. The L4 GPU natively supports this, preventing math overflows (brown images)
+        # THE FIX: Mask-Free requires the standard v1-5 base model, NOT the inpainting model!
         model_pipeline = CatVTONPipeline(
-            base_ckpt="runwayml/stable-diffusion-inpainting",
+            base_ckpt="runwayml/stable-diffusion-v1-5", 
             attn_ckpt="zhengchong/CatVTON-MaskFree",
             attn_ckpt_version="mix", 
             weight_dtype=torch.bfloat16, 
@@ -78,15 +78,11 @@ async def generate_try_on(
         person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
         garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
 
-        # Generate a dummy white mask (255) to allow the Mask-Free AI to repaint the clothes
-        dummy_mask = Image.new("L", person_img.size, 255)
-
-        # Run inference on the GPU
+        # Run inference on the GPU (No mask required for this architecture)
         with torch.no_grad():
             result_image = model_pipeline(
                 image=person_img,
                 condition_image=garment_img,
-                mask=dummy_mask,
                 num_inference_steps=30, 
                 guidance_scale=2.5
             )[0]
