@@ -1,6 +1,10 @@
 .git
 .gitignore
-__pycache__/
+__pycache__
 *.pyc
-.env
-README.md
+*.pyo
+*.pyd
+venv/
+.venv/
+cache/
+tmp/
