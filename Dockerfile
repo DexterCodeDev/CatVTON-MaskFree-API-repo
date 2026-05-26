@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV HF_HOME=/tmp/huggingface
 ENV TORCH_HOME=/tmp/torch
+ENV PYTHONPATH=/app/catvton
 
 WORKDIR /app
 
@@ -18,21 +19,13 @@ COPY requirements.txt .
 
 RUN pip install --upgrade pip
 
+# Install ONLY pinned dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Clone CatVTON automatically
+# Clone CatVTON source only (NO requirements install)
 RUN git clone https://github.com/Zheng-Chong/CatVTON.git /app/catvton
 
-WORKDIR /app/catvton
-
-# Install repo requirements
-RUN pip install --no-cache-dir -r requirements.txt
-
-WORKDIR /app
-
 COPY . .
-
-ENV PYTHONPATH=/app/catvton
 
 EXPOSE 8080
 
