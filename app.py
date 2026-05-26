@@ -47,13 +47,17 @@ async def load_model():
             device='cuda'
         )
         
-        # THE FIX: Disable the underlying Stable Diffusion safety checker to prevent false NSFW blocks
-        if hasattr(model_pipeline, 'pipe') and hasattr(model_pipeline.pipe, 'safety_checker'):
-            model_pipeline.pipe.safety_checker = None
-        elif hasattr(model_pipeline, 'safety_checker'):
-            model_pipeline.safety_checker = None
+        # THE FIX: Replace the safety checker with a dummy pass-through function.
+        # This returns an iterable list of [False], preventing the 'NoneType' crash 
+        # while successfully bypassing the NSFW filter.
+        dummy_safety_checker = lambda images, **kwargs: (images, [False] * len(images))
+        
+        if hasattr(model_pipeline, 'pipe'):
+            model_pipeline.pipe.safety_checker = dummy_safety_checker
+        else:
+            model_pipeline.safety_checker = dummy_safety_checker
             
-        print("Mask-Free Model loaded successfully and safety checker disabled.")
+        print("Mask-Free Model loaded successfully with dummy safety checker.")
     except Exception as e:
         print(f"Failed to load model: {e}")
 
