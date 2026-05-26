@@ -38,18 +38,16 @@ async def load_model():
         
         login(token=hf_token)
         
-        # Using torch.float16 for hardware compatibility with the NVIDIA L4
+        # THE FIX: Switch to bfloat16. The L4 GPU natively supports this, preventing math overflows (brown images)
         model_pipeline = CatVTONPipeline(
             base_ckpt="runwayml/stable-diffusion-inpainting",
             attn_ckpt="zhengchong/CatVTON-MaskFree",
             attn_ckpt_version="mix", 
-            weight_dtype=torch.float16, 
+            weight_dtype=torch.bfloat16, 
             device='cuda'
         )
         
-        # THE FIX: Replace the safety checker with a dummy pass-through function.
-        # This returns an iterable list of [False], preventing the 'NoneType' crash 
-        # while successfully bypassing the NSFW filter.
+        # Replace the safety checker with a dummy pass-through function to prevent NSFW blocks
         dummy_safety_checker = lambda images, **kwargs: (images, [False] * len(images))
         
         if hasattr(model_pipeline, 'pipe'):
