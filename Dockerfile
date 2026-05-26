@@ -1,29 +1,36 @@
-# Updated to match the torch==2.4.0 requirement
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-runtime
+FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV HF_HOME=/tmp/huggingface
+ENV TORCH_HOME=/tmp/torch
 
 WORKDIR /app
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=UTC
-
-# git is absolutely required here to fetch diffusers from GitHub
 RUN apt-get update && apt-get install -y \
     git \
-    libgl1-mesa-glx \
+    ffmpeg \
+    libgl1 \
     libglib2.0-0 \
-    tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN git clone https://github.com/Zheng-Chong/CatVTON.git /external_modules/CatVTON
+# Auto pull CatVTON source
+RUN git clone https://github.com/Zheng-Chong/CatVTON.git /app/catvton
 
-ENV PYTHONPATH="${PYTHONPATH}:/external_modules/CatVTON"
+WORKDIR /app/catvton
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+WORKDIR /app
 
 COPY . .
 
+ENV PYTHONPATH="/app/catvton"
+
 EXPOSE 8080
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["python", "app.py"]
