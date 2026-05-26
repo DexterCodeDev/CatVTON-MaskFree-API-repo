@@ -46,7 +46,14 @@ async def load_model():
             weight_dtype=torch.float16, 
             device='cuda'
         )
-        print("Mask-Free Model loaded successfully.")
+        
+        # THE FIX: Disable the underlying Stable Diffusion safety checker to prevent false NSFW blocks
+        if hasattr(model_pipeline, 'pipe') and hasattr(model_pipeline.pipe, 'safety_checker'):
+            model_pipeline.pipe.safety_checker = None
+        elif hasattr(model_pipeline, 'safety_checker'):
+            model_pipeline.safety_checker = None
+            
+        print("Mask-Free Model loaded successfully and safety checker disabled.")
     except Exception as e:
         print(f"Failed to load model: {e}")
 
@@ -69,7 +76,7 @@ async def generate_try_on(
         person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
         garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
 
-        # THE FIX: Generate a dummy white mask (255) to allow the Mask-Free AI to repaint the clothes
+        # Generate a dummy white mask (255) to allow the Mask-Free AI to repaint the clothes
         dummy_mask = Image.new("L", person_img.size, 255)
 
         # Run inference on the GPU
