@@ -1,22 +1,24 @@
-fastapi
-uvicorn[standard]
-python-multipart
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
 
-torch
-torchvision
-torchaudio
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
 
-diffusers
-transformers
-accelerate
-safetensors
+diffusers==0.29.2
+transformers==4.44.2
+accelerate==0.34.2
+safetensors==0.4.5
 
-huggingface_hub
-Pillow
-numpy
-opencv-python
-scipy
-einops
-omegaconf
-tqdm
-xformers
+huggingface_hub==0.24.6
+
+Pillow==10.4.0
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+scipy==1.14.1
+einops==0.8.0
+omegaconf==2.3.0
+tqdm==4.66.5
+
+xformers==0.0.28.post3
