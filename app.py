@@ -1,5 +1,6 @@
 import os
 import io
+import threading
 import torch
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -19,42 +20,42 @@ DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
 print(f"Using device: {DEVICE}")
 
 # -----------------------------
-# CatVTON imports
-# -----------------------------
-from model.pipeline import CatVTONPix2PixPipeline
-from utils import resize_and_crop, resize_and_padding
-
-# -----------------------------
 # FastAPI
 # -----------------------------
 app = FastAPI()
 
 pipeline = None
+model_loading = False
+startup_error = None
 
 
 # -----------------------------
-# Startup
+# Model Loader
 # -----------------------------
-@app.on_event("startup")
-async def startup_event():
-    global pipeline
+def load_model():
+    global pipeline, model_loading, startup_error
 
     try:
-        print("Loading CatVTON model...")
+        model_loading = True
+
+        print("Importing CatVTON...")
+
+        from model.pipeline import CatVTONPix2PixPipeline
+        from utils import resize_and_crop, resize_and_padding
+
+        globals()["resize_and_crop"] = resize_and_crop
+        globals()["resize_and_padding"] = resize_and_padding
 
         hf_token = os.getenv("HF_TOKEN")
 
-        if not hf_token:
-            raise RuntimeError("HF_TOKEN environment variable missing")
-
-        print("Downloading MaskFree model...")
+        print("Downloading model from HuggingFace...")
 
         repo_path = snapshot_download(
             repo_id="zhengchong/CatVTON-MaskFree",
             token=hf_token
         )
 
-        print("Initializing pipeline...")
+        print("Loading pipeline...")
 
         pipeline = CatVTONPix2PixPipeline(
             base_ckpt="booksforcharlie/stable-diffusion-inpainting",
@@ -64,11 +65,26 @@ async def startup_event():
             device=DEVICE
         )
 
-        print("CatVTON model loaded successfully.")
+        print("Model loaded successfully.")
 
     except Exception as e:
-        print(f"Startup failed: {str(e)}")
-        raise e
+        startup_error = str(e)
+        print(f"MODEL LOAD FAILED: {startup_error}")
+
+    finally:
+        model_loading = False
+
+
+# -----------------------------
+# Startup
+# -----------------------------
+@app.on_event("startup")
+async def startup_event():
+    thread = threading.Thread(
+        target=load_model,
+        daemon=True
+    )
+    thread.start()
 
 
 # -----------------------------
@@ -77,18 +93,20 @@ async def startup_event():
 @app.get("/")
 async def root():
     return {
-        "message": "CatVTON MaskFree API running"
+        "message": "CatVTON API running"
     }
 
 
 @app.get("/health")
 async def health():
-    return JSONResponse({
+    return {
         "status": "healthy",
-        "gpu": DEVICE,
+        "device": DEVICE,
         "cuda_available": torch.cuda.is_available(),
-        "model_loaded": pipeline is not None
-    })
+        "model_loaded": pipeline is not None,
+        "model_loading": model_loading,
+        "startup_error": startup_error
+    }
 
 
 @app.post("/tryon")
@@ -98,16 +116,19 @@ async def tryon(
 ):
     global pipeline
 
+    if startup_error:
+        raise HTTPException(
+            status_code=500,
+            detail=startup_error
+        )
+
+    if pipeline is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model still loading"
+        )
+
     try:
-
-        if pipeline is None:
-            raise HTTPException(
-                status_code=500,
-                detail="Model not loaded"
-            )
-
-        print("Reading images...")
-
         person_bytes = await person_image.read()
         cloth_bytes = await cloth_image.read()
 
@@ -121,8 +142,6 @@ async def tryon(
 
         width = 768
         height = 1024
-
-        print("Preprocessing images...")
 
         person = resize_and_crop(
             person,
@@ -138,8 +157,6 @@ async def tryon(
             device=DEVICE
         ).manual_seed(42)
 
-        print("Running inference...")
-
         with torch.inference_mode():
 
             result = pipeline(
@@ -149,8 +166,6 @@ async def tryon(
                 guidance_scale=2.5,
                 generator=generator
             )[0]
-
-        print("Creating response image...")
 
         img_io = io.BytesIO()
 
@@ -170,26 +185,19 @@ async def tryon(
         )
 
     except Exception as e:
-        print(f"Inference error: {str(e)}")
-
         raise HTTPException(
             status_code=500,
             detail=str(e)
         )
 
 
-# -----------------------------
-# Run server
-# -----------------------------
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(
-        os.environ.get("PORT", 8080)
-    )
+    port = int(os.environ.get("PORT", 8080))
 
     uvicorn.run(
-        "app:app",
+        app,
         host="0.0.0.0",
         port=port
     )
