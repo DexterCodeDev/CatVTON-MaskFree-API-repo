@@ -1,99 +1,130 @@
-import io
 import os
+import io
 import torch
+import tempfile
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
+
+from huggingface_hub import snapshot_download
 from PIL import Image
-from huggingface_hub import login
 
-from model.pipeline import CatVTONPipeline
+# -------------------
+# CUDA optimization
+# -------------------
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
 
-app = FastAPI(
-    title="Serene Clothing Virtual Try-On API",
-    description="Serverless GPU inference endpoint (Mask-Free).",
-    contact={
-        "email": "support@sereneclothing.store"
-    }
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DTYPE = torch.bfloat16 if DEVICE == "cuda" else torch.float32
+
+print(f"Using device: {DEVICE}")
+
+# -------------------
+# Import CatVTON
+# -------------------
+from model.pipeline import CatVTONPix2PixPipeline
+from utils import resize_and_crop, resize_and_padding
+
+# -------------------
+# Load model once
+# -------------------
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+print("Downloading CatVTON-MaskFree...")
+
+repo_path = snapshot_download(
+    repo_id="zhengchong/CatVTON-MaskFree",
+    token=HF_TOKEN
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+print("Loading pipeline...")
+
+pipeline = CatVTONPix2PixPipeline(
+    base_ckpt="timbrooks/instruct-pix2pix",
+    attn_ckpt=repo_path,
+    attn_ckpt_version="mix-48k-1024",
+    weight_dtype=DTYPE,
+    use_tf32=True,
+    device=DEVICE
 )
 
-model_pipeline = None
+print("Model loaded.")
 
-@app.on_event("startup")
-async def load_model():
-    """Loads the Mask-Free CatVTON weights into the GPU during container boot."""
-    global model_pipeline
-    try:
-        hf_token = os.environ.get("HF_TOKEN")
-        if not hf_token:
-            print("WARNING: HF_TOKEN environment variable is missing!")
-        
-        login(token=hf_token)
-        
-        # THE FIX: Mask-Free requires the standard v1-5 base model, NOT the inpainting model!
-        model_pipeline = CatVTONPipeline(
-            base_ckpt="runwayml/stable-diffusion-v1-5", 
-            attn_ckpt="zhengchong/CatVTON-MaskFree",
-            attn_ckpt_version="mix", 
-            weight_dtype=torch.bfloat16, 
-            device='cuda'
-        )
-        
-        # Replace the safety checker with a dummy pass-through function to prevent NSFW blocks
-        dummy_safety_checker = lambda images, **kwargs: (images, [False] * len(images))
-        
-        if hasattr(model_pipeline, 'pipe'):
-            model_pipeline.pipe.safety_checker = dummy_safety_checker
-        else:
-            model_pipeline.safety_checker = dummy_safety_checker
-            
-        print("Mask-Free Model loaded successfully with dummy safety checker.")
-    except Exception as e:
-        print(f"Failed to load model: {e}")
+app = FastAPI()
+
 
 @app.get("/")
-def health_check():
-    """Endpoint to check if the GPU has finished downloading and loading the model."""
-    return {"status": "active", "model_loaded": model_pipeline is not None}
+async def root():
+    return {"message": "CatVTON MaskFree API running"}
 
-@app.post("/try-on")
-async def generate_try_on(
+
+@app.get("/health")
+async def health():
+    return JSONResponse(
+        {
+            "status": "healthy",
+            "gpu": DEVICE,
+            "cuda_available": torch.cuda.is_available()
+        }
+    )
+
+
+@app.post("/tryon")
+async def tryon(
     person_image: UploadFile = File(...),
-    garment_image: UploadFile = File(...)
+    cloth_image: UploadFile = File(...),
 ):
-    """Processes the 2-image try-on request and returns the synthesized image."""
-    if not model_pipeline:
-        raise HTTPException(status_code=503, detail="GPU Model is still initializing or failed to load.")
-
     try:
-        # Convert incoming multipart files into RGB PIL Images
-        person_img = Image.open(io.BytesIO(await person_image.read())).convert("RGB")
-        garment_img = Image.open(io.BytesIO(await garment_image.read())).convert("RGB")
 
-        # Run inference on the GPU (No mask required for this architecture)
-        with torch.no_grad():
-            result_image = model_pipeline(
-                image=person_img,
-                condition_image=garment_img,
-                num_inference_steps=30, 
-                guidance_scale=2.5
+        person_bytes = await person_image.read()
+        cloth_bytes = await cloth_image.read()
+
+        person = Image.open(io.BytesIO(person_bytes)).convert("RGB")
+        cloth = Image.open(io.BytesIO(cloth_bytes)).convert("RGB")
+
+        width = 768
+        height = 1024
+
+        person = resize_and_crop(person, (width, height))
+        cloth = resize_and_padding(cloth, (width, height))
+
+        generator = torch.Generator(device=DEVICE).manual_seed(42)
+
+        with torch.inference_mode():
+            result = pipeline(
+                image=person,
+                condition_image=cloth,
+                num_inference_steps=30,
+                guidance_scale=2.5,
+                generator=generator
             )[0]
 
-        # Convert output to a byte stream
-        memory_stream = io.BytesIO()
-        result_image.save(memory_stream, format="PNG")
-        memory_stream.seek(0)
+        img_io = io.BytesIO()
+        result.save(img_io, format="PNG")
+        img_io.seek(0)
 
-        # Stream directly back to the frontend
-        return StreamingResponse(memory_stream, media_type="image/png")
+        torch.cuda.empty_cache()
+
+        return StreamingResponse(
+            img_io,
+            media_type="image/png"
+        )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Inference failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.environ.get("PORT", 8080))
+
+    uvicorn.run(
+        "app:app",
+        host="0.0.0.0",
+        port=port
+    )
