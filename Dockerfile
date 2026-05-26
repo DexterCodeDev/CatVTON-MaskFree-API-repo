@@ -16,20 +16,23 @@ RUN apt-get update && apt-get install -y \
 
 COPY requirements.txt .
 
+RUN pip install --upgrade pip
+
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Auto pull CatVTON source
+# Clone CatVTON automatically
 RUN git clone https://github.com/Zheng-Chong/CatVTON.git /app/catvton
 
 WORKDIR /app/catvton
 
+# Install repo requirements
 RUN pip install --no-cache-dir -r requirements.txt
 
 WORKDIR /app
 
 COPY . .
 
-ENV PYTHONPATH="/app/catvton"
+ENV PYTHONPATH=/app/catvton
 
 EXPOSE 8080
 
